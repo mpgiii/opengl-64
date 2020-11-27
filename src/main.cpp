@@ -15,6 +15,7 @@
 #include "MatrixStack.h"
 #include "WindowManager.h"
 #include "stb_image.h"
+#include "particleSys.h"
 
 #define TINYOBJLOADER_IMPLEMENTATION
 #include <tiny_obj_loader/tiny_obj_loader.h>
@@ -38,6 +39,7 @@ public:
 	std::shared_ptr<Program> prog;
     std::shared_ptr<Program> textProg;
 	std::shared_ptr<Program> cubeProg;
+	std::shared_ptr<Program> partProg;
     
     // Shape to be used (from  file) - modify to support multiple
     shared_ptr<Shape> mesh;
@@ -47,11 +49,9 @@ public:
     vector<shared_ptr<Shape>> coin;
     vector<shared_ptr<Shape>> skybox;
     
-    // Textures to be used
-    shared_ptr<Texture> texture0;
-    shared_ptr<Texture> texture1;
-    shared_ptr<Texture> texture2;
+    // Textures to be usedini
 	vector<shared_ptr<Texture>> plane_texture;
+	shared_ptr<Texture> part_texture;
 
 	// keep track of which coins have been retrieved
 	uint8_t coin_flags = 0;
@@ -98,6 +98,13 @@ public:
 
 	vector<vec3> coin_loc{ vec3(-20, 17, -2), vec3(-3, 5, -11), vec3(23, 6, -27), vec3(14, 10, 28),
 	                       vec3(21, 0, 8),    vec3(-1, 23, 22), vec3(-22, 7, 1),  vec3(38, 6, 11)  };
+
+	// the partricle system itself
+	vector<particleSys*> partSystems;
+
+	//some particle variables
+	float t = 0.0f; //reset in init
+	float h = 0.01f;
     
     void scrollCallback(GLFWwindow* window, double deltaX, double deltaY) {
         cout << "use two finger mouse scroll" << endl;
@@ -191,6 +198,10 @@ public:
 		glViewport(0, 0, width, height);
 	}
 
+	void cursorPosCallback(GLFWwindow* window, double xpos, double ypos) {
+		return;
+	}
+
 	void init(const std::string& resourceDirectory)
 	{
 		GLSL::checkVersion();
@@ -226,6 +237,19 @@ public:
 		textProg->addAttribute("vertPos");
 		textProg->addAttribute("vertNor");
         textProg->addAttribute("vertTex");
+
+		// Initialize the GLSL program.
+		partProg = make_shared<Program>();
+		partProg->setVerbose(true);
+		partProg->setShaderNames(resourceDirectory + "/lab10_vert.glsl", resourceDirectory + "/lab10_frag.glsl");
+		partProg->init();
+		partProg->addUniform("P");
+		partProg->addUniform("M");
+		partProg->addUniform("V");
+		partProg->addAttribute("pColor");
+		partProg->addUniform("alphaTexture");
+		partProg->addAttribute("vertPos");
+
         
         // Initialize the GLSL program -- this one is for NON-textured stuff.
 		prog = make_shared<Program>();
@@ -243,6 +267,13 @@ public:
 		prog->addAttribute("vertPos");
 		prog->addAttribute("vertNor");
         prog->addAttribute("vertTex");
+	}
+
+	void initPart() {
+		for (int i = 0; i < coin_loc.size(); i++) {
+			partSystems.push_back(new particleSys(coin_loc[i]));
+			partSystems[i]->gpuSetup();
+		}
 	}
 
 	void initGeom(const std::string& resourceDirectory)
@@ -303,29 +334,19 @@ public:
 	}
     
     void initTex(const std::string& resourceDirectory) {
-        texture0 = make_shared<Texture>();
-        texture0->setFilename(resourceDirectory + "/crate.jpg");
-        texture0->init();
-        texture0->setUnit(0);
-        texture0->setWrapModes(GL_CLAMP_TO_EDGE, GL_CLAMP_TO_EDGE);
-        
-        texture1 = make_shared<Texture>();
-        texture1->setFilename(resourceDirectory + "/world.jpg");
-        texture1->init();
-        texture1->setUnit(1);
-        texture1->setWrapModes(GL_CLAMP_TO_EDGE, GL_CLAMP_TO_EDGE);
-        
-        texture2 = make_shared<Texture>();
-        texture2->setFilename(resourceDirectory + "/grass.jpg");
-        texture2->init();
-        texture2->setUnit(2);
-        texture2->setWrapModes(GL_CLAMP_TO_EDGE, GL_CLAMP_TO_EDGE);
+		// for particles
+		part_texture = make_shared<Texture>();
+		part_texture->setFilename(resourceDirectory + "/alpha.bmp");
+		part_texture->init();
+		part_texture->setUnit(0);
+		part_texture->setWrapModes(GL_CLAMP_TO_EDGE, GL_CLAMP_TO_EDGE);
 
+		// for world
 		for (int i = 0; i < NUM_TEXTURES; i++) {
 			plane_texture.push_back(make_shared<Texture>());
 			plane_texture[i]->setFilename(resourceDirectory + "/Textures/" + plane_filenames[i]);
 			plane_texture[i]->init();
-			plane_texture[i]->setUnit(i+3);
+			plane_texture[i]->setUnit(i+1);
 			plane_texture[i]->setWrapModes(GL_REPEAT, GL_REPEAT);
 		}
     }
@@ -448,6 +469,25 @@ public:
 		Model->popMatrix();
 	}
 
+	void drawParticles(shared_ptr<MatrixStack> Projection, shared_ptr<MatrixStack> View, shared_ptr<MatrixStack> Model) {
+		partProg->bind();
+		part_texture->bind(partProg->getUniform("alphaTexture"));
+		CHECKED_GL_CALL(glUniformMatrix4fv(partProg->getUniform("P"), 1, GL_FALSE, value_ptr(Projection->topMatrix())));
+		CHECKED_GL_CALL(glUniformMatrix4fv(partProg->getUniform("V"), 1, GL_FALSE, value_ptr(View->topMatrix())));
+		CHECKED_GL_CALL(glUniformMatrix4fv(partProg->getUniform("M"), 1, GL_FALSE, value_ptr(Model->topMatrix())));
+
+		for (int i = 0; i < partSystems.size(); i++) {
+			// if this coin has already been retrieved, draw particles there
+			if (coin_flags & 1 << i) {
+				partSystems[i]->setCamera(View->topMatrix());
+				partSystems[i]->drawMe(partProg);
+				partSystems[i]->update();
+			}
+		}
+
+		partProg->unbind();
+	}
+
 	void render(GLFWwindow *window) {
 		// Get current frame buffer size.
 		int width, height;
@@ -519,6 +559,9 @@ public:
 		setSkybox(Projection, View, Model);
         
         sAnimation = sin(glfwGetTime());
+
+		// now do the particle stuff
+		drawParticles(Projection, View, Model);
 
 		// Pop matrix stacks.
 		Projection->popMatrix();
@@ -599,6 +642,7 @@ int main(int argc, char *argv[])
 	application->init(resourceDir);
 	application->initGeom(resourceDir);
     application->initTex(resourceDir);
+	application->initPart();
     res = application->createSky(resourceDir, faces);
 	ShowCursor(false);
 
