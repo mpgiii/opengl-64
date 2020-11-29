@@ -36,9 +36,6 @@ using namespace irrklang;
 
 #define NUM_TEXTURES 21
 
-// audio engine
-ISoundEngine* SoundEngine = createIrrKlangDevice();
-
 class Application : public EventCallbacks {
 
 public:
@@ -108,7 +105,8 @@ public:
 	// the partricle system itself
 	vector<particleSys*> partSystems;
 
-    
+	// audio engine
+	ISoundEngine* SoundEngine = createIrrKlangDevice();
 
 	// text stuff now
 	struct Character {
@@ -794,7 +792,7 @@ int main(int argc, char *argv[])
 	ShowCursor(false);
 
 	// start up the music
-	SoundEngine->play2D("../audio/theme.mp3", true);
+	application->SoundEngine->play2D("../audio/theme.mp3", true);
 
 	// init text to write on screen
 	if (application->initText() == -1) {
