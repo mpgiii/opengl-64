@@ -1,8 +1,7 @@
 /*
- * Lab 5 base code (could also be used for Program 2)
- * includes modifications to shape and initGeom in preparation to load
- * multi shape objects 
- * CPE 471 Cal Poly Z. Wood + S. Sueda + I. Dunn
+ * CPE 471 Final Project -- Mario 64 Coin Collector
+ * Dr. Zoe Wood
+ * Michael Georgariou
  */
 
 #include <iostream>
@@ -40,16 +39,16 @@ public:
     std::shared_ptr<Program> textProg;
 	std::shared_ptr<Program> cubeProg;
 	std::shared_ptr<Program> partProg;
-    
-    // Shape to be used (from  file) - modify to support multiple
+
+    // Shape to be used (from file) - modify to support multiple
     shared_ptr<Shape> mesh;
 
     // all the shapes
     vector<shared_ptr<Shape>> plane;
     vector<shared_ptr<Shape>> coin;
     vector<shared_ptr<Shape>> skybox;
-    
-    // Textures to be usedini
+
+    // Textures to be used
 	vector<shared_ptr<Texture>> plane_texture;
 	shared_ptr<Texture> part_texture;
 
@@ -62,9 +61,6 @@ public:
 	// Data necessary to give our triangle to OpenGL
 	GLuint VertexBufferID;
 
-	//example data that might be useful when trying to compute bounds on multi-shape
-	vec3 gMin;
-
 	//animation data
 	float sTheta = 2.0;
     float sPhi = 0;
@@ -73,7 +69,7 @@ public:
 	float walkSensitivity = 0.1;
 
 	// camera stuff
-	vec3 eye = vec3(20, 2, -45);
+	vec3 eye = vec3(20, 2, -45); // starting position
 	vec3 up = vec3(0, 1, 0);
 	vec3 direction = vec3(cos(sPhi) * cos(sTheta), sin(sPhi), cos(sPhi) * cos((3.141593 / 2.0) - sTheta));
 	vec3 center = eye + direction;
@@ -88,8 +84,6 @@ public:
 	bool space = false;
 	bool shift = false;
 
-	int x_pos, z_pos = 0;
-
     vector<string> plane_filenames{ "574B138E_c.png", "41A41EE3_c.png", "1FAAE88D_c.png", "359289F2_c.png", 
 		"6E3A21B_c.png", "6B1A233B_c.png", "6B2D96F_c.png", "12436720_c.png", 
 		"1FAAE88D_c.png", "1FAAE88D_c.png", "275F399C_c.png", "4020CDFE_c.png", 
@@ -97,17 +91,14 @@ public:
 		"3F485258_c.png", "10E99677_c.png", "359289F2_c.png", "6B2D96F_c.png", "12436720_c.png" };
 
 	vector<vec3> coin_loc{ vec3(-20, 17, -2), vec3(-3, 5, -11), vec3(23, 6, -27), vec3(14, 10, 28),
-	                       vec3(21, 0, 8),    vec3(-1, 23, 22), vec3(-22, 7, 1),  vec3(38, 6, 11)  };
+	                       vec3(21, 0, 8), vec3(-1, 23, 22), vec3(-22, 7, 1), vec3(38, 6, 11)  };
 
 	// the partricle system itself
 	vector<particleSys*> partSystems;
 
-	//some particle variables
-	float t = 0.0f; //reset in init
-	float h = 0.01f;
     
     void scrollCallback(GLFWwindow* window, double deltaX, double deltaY) {
-        cout << "use two finger mouse scroll" << endl;
+		return;
     }
 
 	void keyCallback(GLFWwindow *window, int key, int scancode, int action, int mods)
@@ -115,22 +106,6 @@ public:
 		if (key == GLFW_KEY_ESCAPE && action == GLFW_PRESS)
 		{
 			glfwSetWindowShouldClose(window, GL_TRUE);
-		}
-		if (key == GLFW_KEY_I && action == GLFW_PRESS) {
-			x_pos += 1;
-			cout << x_pos << " " << z_pos << endl;
-		}
-		if (key == GLFW_KEY_K && action == GLFW_PRESS) {
-			x_pos -= 1;
-			cout << x_pos << " " << z_pos << endl;
-		}
-		if (key == GLFW_KEY_L && action == GLFW_PRESS) {
-			z_pos += 1;
-			cout << x_pos << " " << z_pos << endl;
-		}
-		if (key == GLFW_KEY_J && action == GLFW_PRESS) {
-			z_pos -= 1;
-			cout << x_pos << " " << z_pos << endl;
 		}
         if (key == GLFW_KEY_W && action == GLFW_PRESS) {
 			w = true;
@@ -250,7 +225,6 @@ public:
 		partProg->addUniform("alphaTexture");
 		partProg->addAttribute("vertPos");
 
-        
         // Initialize the GLSL program -- this one is for NON-textured stuff.
 		prog = make_shared<Program>();
 		prog->setVerbose(true);
@@ -278,7 +252,6 @@ public:
 
 	void initGeom(const std::string& resourceDirectory)
 	{
-
 		//EXAMPLE set up to read one shape from one obj file - convert to read several
 		// Initialize mesh
 		// Load geometry
@@ -439,6 +412,7 @@ public:
 
 	void checkCoins() {
 		for (int i = 0; i < coin_loc.size(); i++) {
+			// if you are within 2 units of any coin, collect it
 			if (distance(eye, coin_loc[i]) < 2) {
 				coin_flags |= 1 << i;
 			}
@@ -450,12 +424,14 @@ public:
 		Model->pushMatrix();
 		Model->loadIdentity();
 
+		// loop through all the coin locations
 		for (int i = 0; i < coin_loc.size(); i++) {
 			if (!(coin_flags & 1 << i)) {
-				// star on the island
 				Model->pushMatrix();
+					// make em gold
 					SetMaterial(2);
 					Model->translate(coin_loc[i]);
+					// make it pretty by rotating it
 					Model->rotate(sAnimation, vec3(0, 1, 0));
 					Model->scale(vec3(0.05, 0.05, 0.05));
 					setModel(prog, Model);
@@ -522,6 +498,10 @@ public:
 			View->loadIdentity();
 			View->lookAt(eye, center, up);
 
+		Model->pushMatrix();
+		Model->loadIdentity();
+
+
 		// Draw all the non-textured stuff first
 		prog->bind();
 		glUniformMatrix4fv(prog->getUniform("P"), 1, GL_FALSE, value_ptr(Projection->topMatrix()));
@@ -566,6 +546,7 @@ public:
 		// Pop matrix stacks.
 		Projection->popMatrix();
 		View->popMatrix();
+		Model->popMatrix();
 
 	}
     
@@ -632,7 +613,7 @@ int main(int argc, char *argv[])
 	// and GL context, etc.
 
 	WindowManager *windowManager = new WindowManager();
-	windowManager->init(640, 480);
+	windowManager->init(1366, 768);
 	windowManager->setEventCallbacks(application);
 	application->windowManager = windowManager;
 
