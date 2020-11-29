@@ -19,14 +19,25 @@
 #define TINYOBJLOADER_IMPLEMENTATION
 #include <tiny_obj_loader/tiny_obj_loader.h>
 
+// stuff for on screen text
+#include "ft2build.h"
+#include "freetype/freetype.h"  
+
+// stuff for audio
+#include <irrklang/irrKlang.h>
+
 // value_ptr for glm
 #include <glm/gtc/type_ptr.hpp>
 #include <glm/gtc/matrix_transform.hpp>
 
 using namespace std;
 using namespace glm;
+using namespace irrklang;
 
 #define NUM_TEXTURES 21
+
+// audio engine
+ISoundEngine* SoundEngine = createIrrKlangDevice();
 
 class Application : public EventCallbacks {
 
@@ -36,7 +47,8 @@ public:
 
 	// Our shader program
 	std::shared_ptr<Program> prog;
-    std::shared_ptr<Program> textProg;
+    std::shared_ptr<Program> texProg;
+	std::shared_ptr<Program> textProg;
 	std::shared_ptr<Program> cubeProg;
 	std::shared_ptr<Program> partProg;
 
@@ -97,6 +109,19 @@ public:
 	vector<particleSys*> partSystems;
 
     
+
+	// text stuff now
+	struct Character {
+		unsigned int TextureID;  // ID handle of the glyph texture
+		glm::ivec2   Size;       // Size of glyph
+		glm::ivec2   Bearing;    // Offset from baseline to left/top of glyph
+		unsigned int Advance;    // Offset to advance to next glyph
+	};
+
+	std::map<char, Character> Characters;
+
+	unsigned int VAO, VBO;
+
     void scrollCallback(GLFWwindow* window, double deltaX, double deltaY) {
 		return;
     }
@@ -199,19 +224,29 @@ public:
         cubeProg->addAttribute("vertNor");
 
 		// Initialize the GLSL program -- this one is for textured stuff.
+		texProg = make_shared<Program>();
+		texProg->setVerbose(true);
+		texProg->setShaderNames(resourceDirectory + "/tex_vert.glsl", resourceDirectory + "/tex_frag.glsl");
+		texProg->init();
+		texProg->addUniform("P");
+		texProg->addUniform("V");
+		texProg->addUniform("M");
+        texProg->addUniform("lightP");
+        texProg->addUniform("shine");
+        texProg->addUniform("Texture0");
+		texProg->addAttribute("vertPos");
+		texProg->addAttribute("vertNor");
+        texProg->addAttribute("vertTex");
+
+		// Initialize the GLSL program -- this one is for textured stuff.
 		textProg = make_shared<Program>();
 		textProg->setVerbose(true);
-		textProg->setShaderNames(resourceDirectory + "/tex_vert.glsl", resourceDirectory + "/tex_frag.glsl");
+		textProg->setShaderNames(resourceDirectory + "/text_vert.glsl", resourceDirectory + "/text_frag.glsl");
 		textProg->init();
-		textProg->addUniform("P");
-		textProg->addUniform("V");
-		textProg->addUniform("M");
-        textProg->addUniform("lightP");
-        textProg->addUniform("shine");
-        textProg->addUniform("Texture0");
-		textProg->addAttribute("vertPos");
-		textProg->addAttribute("vertNor");
-        textProg->addAttribute("vertTex");
+		textProg->addAttribute("vertex");
+		textProg->addUniform("projection");
+		textProg->addUniform("text");
+		textProg->addUniform("textColor");
 
 		// Initialize the GLSL program.
 		partProg = make_shared<Program>();
@@ -323,6 +358,130 @@ public:
 			plane_texture[i]->setWrapModes(GL_REPEAT, GL_REPEAT);
 		}
     }
+
+	int initText() {
+		FT_Library ft;
+		if (FT_Init_FreeType(&ft)) {
+			std::cout << "ERROR::FREETYPE: Could not init FreeType Library" << std::endl;
+			return -1;
+		}
+
+		FT_Face face;
+		if (FT_New_Face(ft, "../fonts/Mario64.ttf", 0, &face)) {
+			std::cout << "ERROR::FREETYPE: Failed to load font" << std::endl;
+			return -1;
+		}
+
+		// set width to 0 and height to 48
+		FT_Set_Pixel_Sizes(face, 0, 48);
+
+		glPixelStorei(GL_UNPACK_ALIGNMENT, 1); // disable byte-alignment restriction
+
+		for (unsigned char c = 0; c < 128; c++) {
+			// load character glyph 
+			if (FT_Load_Char(face, c, FT_LOAD_RENDER))
+			{
+				std::cout << "ERROR::FREETYTPE: Failed to load Glyph" << std::endl;
+				continue;
+			}
+			// generate texture
+			unsigned int texture;
+			glGenTextures(1, &texture);
+			glBindTexture(GL_TEXTURE_2D, texture);
+			glTexImage2D(
+				GL_TEXTURE_2D,
+				0,
+				GL_RED,
+				face->glyph->bitmap.width,
+				face->glyph->bitmap.rows,
+				0,
+				GL_RED,
+				GL_UNSIGNED_BYTE,
+				face->glyph->bitmap.buffer
+			);
+			// set texture options
+			glTexParameteri(GL_TEXTURE_2D, GL_TEXTURE_WRAP_S, GL_CLAMP_TO_EDGE);
+			glTexParameteri(GL_TEXTURE_2D, GL_TEXTURE_WRAP_T, GL_CLAMP_TO_EDGE);
+			glTexParameteri(GL_TEXTURE_2D, GL_TEXTURE_MIN_FILTER, GL_LINEAR);
+			glTexParameteri(GL_TEXTURE_2D, GL_TEXTURE_MAG_FILTER, GL_LINEAR);
+			// now store character for later use
+			Character character = {
+				texture,
+				glm::ivec2(face->glyph->bitmap.width, face->glyph->bitmap.rows),
+				glm::ivec2(face->glyph->bitmap_left, face->glyph->bitmap_top),
+				face->glyph->advance.x
+			};
+			Characters.insert(std::pair<char, Character>(c, character));
+		}
+
+		// enable blending
+		glEnable(GL_BLEND);
+		glBlendFunc(GL_SRC_ALPHA, GL_ONE_MINUS_SRC_ALPHA);
+
+		mat4 projection = ortho(0.0f, 800.0f, 0.0f, 600.0f);
+
+		// create a VBO and VAO for rendering the quads
+		glGenVertexArrays(1, &VAO);
+		glGenBuffers(1, &VBO);
+		glBindVertexArray(VAO);
+		glBindBuffer(GL_ARRAY_BUFFER, VBO);
+		glBufferData(GL_ARRAY_BUFFER, sizeof(float) * 6 * 4, NULL, GL_DYNAMIC_DRAW);
+		glEnableVertexAttribArray(0);
+		glVertexAttribPointer(0, 4, GL_FLOAT, GL_FALSE, 4 * sizeof(float), 0);
+		glBindBuffer(GL_ARRAY_BUFFER, 0);
+		glBindVertexArray(0);
+
+		glEnable(GL_BLEND);
+		glBlendFunc(GL_SRC_ALPHA, GL_ONE_MINUS_SRC_ALPHA);
+
+		FT_Done_Face(face);
+		FT_Done_FreeType(ft);
+
+		return 0;
+	}
+	
+	void renderText(string text, float x, float y, float scale, vec3 color) {
+		textProg->bind();
+		glUniform3f(textProg->getUniform("textColor"), color.x, color.y, color.z);
+		glActiveTexture(GL_TEXTURE0);
+		glBindVertexArray(VAO);
+
+		// iterate through all characters
+		std::string::const_iterator c;
+		for (c = text.begin(); c != text.end(); c++)
+		{
+			Character ch = Characters[*c];
+
+			float xpos = x + ch.Bearing.x * scale;
+			float ypos = y - (ch.Size.y - ch.Bearing.y) * scale;
+
+			float w = ch.Size.x * scale;
+			float h = ch.Size.y * scale;
+			// update VBO for each character
+			float vertices[6][4] = {
+				{ xpos,     ypos + h,   0.0f, 0.0f },
+				{ xpos,     ypos,       0.0f, 1.0f },
+				{ xpos + w, ypos,       1.0f, 1.0f },
+
+				{ xpos,     ypos + h,   0.0f, 0.0f },
+				{ xpos + w, ypos,       1.0f, 1.0f },
+				{ xpos + w, ypos + h,   1.0f, 0.0f }
+			};
+			// render glyph texture over quad
+			glBindTexture(GL_TEXTURE_2D, ch.TextureID);
+			// update content of VBO memory
+			glBindBuffer(GL_ARRAY_BUFFER, VBO);
+			glBufferSubData(GL_ARRAY_BUFFER, 0, sizeof(vertices), vertices);
+			glBindBuffer(GL_ARRAY_BUFFER, 0);
+			// render quad
+			glDrawArrays(GL_TRIANGLES, 0, 6);
+			// now advance cursors for next glyph (note that advance is number of 1/64 pixels)
+			x += (ch.Advance >> 6) * scale; // bitshift by 6 to get value in pixels (2^6 = 64)
+		}
+		glBindVertexArray(0);
+		glBindTexture(GL_TEXTURE_2D, 0);
+		textProg->unbind();
+	}
     
     unsigned int createSky(string dir, vector<string> faces) {
         unsigned int textureID;
@@ -414,6 +573,10 @@ public:
 		for (int i = 0; i < coin_loc.size(); i++) {
 			// if you are within 2 units of any coin, collect it
 			if (distance(eye, coin_loc[i]) < 2) {
+				// if we are just now collecting the coin, play the jingle
+				if (!(coin_flags & 1 << i)) {
+					SoundEngine->play2D("../audio/coin.wav", false);
+				}
 				coin_flags |= 1 << i;
 			}
 		}
@@ -515,26 +678,26 @@ public:
         
         
         // Now draw all the textured stuff
-		textProg->bind();
-		glUniformMatrix4fv(textProg->getUniform("P"), 1, GL_FALSE, value_ptr(Projection->topMatrix()));
-		glUniformMatrix4fv(textProg->getUniform("V"), 1, GL_FALSE, value_ptr(View->topMatrix()));
-        glUniform3f(textProg->getUniform("lightP"), 0, 100, 0);
-        glUniform1f(textProg->getUniform("shine"), 120.0);
+		texProg->bind();
+		glUniformMatrix4fv(texProg->getUniform("P"), 1, GL_FALSE, value_ptr(Projection->topMatrix()));
+		glUniformMatrix4fv(texProg->getUniform("V"), 1, GL_FALSE, value_ptr(View->topMatrix()));
+        glUniform3f(texProg->getUniform("lightP"), 0, 100, 0);
+        glUniform1f(texProg->getUniform("shine"), 120.0);
 
 		/* draw the plane */
 		Model->pushMatrix();
 			Model->translate(vec3(0, -0.8, 0));
 			Model->rotate(0.4, vec3(0, 1, 0));
 			Model->scale(vec3(5, 5, 5));
-			setModel(textProg, Model);
+			setModel(texProg, Model);
 			for (int i = 0; i < plane.size(); i++) {
-				plane_texture[i]->bind(textProg->getUniform("Texture0"));
-				plane[i]->draw(textProg);
+				plane_texture[i]->bind(texProg->getUniform("Texture0"));
+				plane[i]->draw(texProg);
 				plane_texture[i]->unbind();
 			}
 		Model->popMatrix();
        
-		textProg->unbind();
+		texProg->unbind();
 
 		setSkybox(Projection, View, Model);
         
@@ -547,6 +710,9 @@ public:
 		Projection->popMatrix();
 		View->popMatrix();
 		Model->popMatrix();
+
+		// draw the text
+		renderText("This is sample text", 100.0f, 100.0f, 1.0f, glm::vec3(0.5, 0.8f, 0.2f));
 
 	}
     
@@ -626,6 +792,14 @@ int main(int argc, char *argv[])
 	application->initPart();
     res = application->createSky(resourceDir, faces);
 	ShowCursor(false);
+
+	// start up the music
+	SoundEngine->play2D("../audio/theme.mp3", true);
+
+	// init text to write on screen
+	if (application->initText() == -1) {
+		return -1;
+	}
 
 	// Loop until the user closes the window.
 	while (! glfwWindowShouldClose(windowManager->getHandle()))
