@@ -208,6 +208,9 @@ public:
 		glClearColor(.12f, .34f, .56f, 1.0f);
 		// Enable z-buffer test.
 		glEnable(GL_DEPTH_TEST);
+		CHECKED_GL_CALL(glEnable(GL_BLEND));
+		CHECKED_GL_CALL(glBlendFunc(GL_SRC_ALPHA, GL_ONE_MINUS_SRC_ALPHA));
+		CHECKED_GL_CALL(glPointSize(24.0f));
 
 		// init the GLSL program for the skybox
 		cubeProg = make_shared<Program>();
