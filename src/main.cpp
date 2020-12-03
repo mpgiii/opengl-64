@@ -398,7 +398,7 @@ public:
 		// for world
 		for (int i = 0; i < NUM_TEXTURES; i++) {
 			plane_texture.push_back(make_shared<Texture>());
-			plane_texture[i]->setFilename(resourceDirectory + "/Textures/" + plane_filenames[i]);
+			plane_texture[i]->setFilename(resourceDirectory + "/textures/" + plane_filenames[i]);
 			plane_texture[i]->init();
 			plane_texture[i]->setUnit(i+1);
 			plane_texture[i]->setWrapModes(GL_REPEAT, GL_REPEAT);
@@ -848,16 +848,16 @@ public:
 
 int main(int argc, char *argv[])
 {
-	// Where the resources are loaded from
+	// Where the resources are loTeaded from
 	std::string resourceDir = "../resources";
 
 	vector<std::string> faces{
-		"/Meadow/posx.jpg",
-		"/Meadow/negx.jpg",
-		"/Meadow/posy.jpg",
-		"/Meadow/negy.jpg",
-		"/Meadow/posz.jpg",
-		"/Meadow/negz.jpg"
+		"/skybox/front.bmp",
+		"/skybox/back.bmp",
+		"/skybox/top.bmp",
+		"/skybox/bottom.bmp",
+		"/skybox/left.bmp",
+		"/skybox/right.bmp"
 	};
 
 	int res;
