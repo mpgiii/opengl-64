@@ -20,7 +20,6 @@ particleSys::particleSys(vec3 source) {
 
 void particleSys::gpuSetup() {
 
-  cout << "start: " << start.x << " " << start.y << " " << start.z << endl;
 	for (int i=0; i < numP; i++) {
 		points[i*3+0] = start.x;
 		points[i*3+1] = start.y;

@@ -6,6 +6,10 @@
 
 #include <iostream>
 #include <glad/glad.h>
+#include <string>  
+#include <iostream> 
+#include <sstream>   
+
 
 #include "GLSL.h"
 #include "Program.h"
@@ -107,6 +111,7 @@ public:
 
 	// audio engine
 	ISoundEngine* SoundEngine = createIrrKlangDevice();
+	ik_f32 volume = 0.5;
 
 	// text stuff now
 	struct Character {
@@ -120,6 +125,8 @@ public:
 
 	unsigned int VAO, VBO;
 
+	vec3 text_color = vec3(1.0, 0.0, 0.0);
+
     void scrollCallback(GLFWwindow* window, double deltaX, double deltaY) {
 		return;
     }
@@ -130,6 +137,44 @@ public:
 		{
 			glfwSetWindowShouldClose(window, GL_TRUE);
 		}
+
+		if (key == GLFW_KEY_R && action == GLFW_PRESS) {
+			// when R is pressed, reset everything
+				//animation data
+			sTheta = 2.0;
+			sPhi = 0;
+
+			// camera stuff
+			eye = vec3(20, 2, -45); // starting position
+			center = eye + direction;
+
+			for (int i = 0; i < partSystems.size(); i++) {
+				// if this coin has already been retrieved, reset its particles
+				if (coin_flags & 1 << i) {
+					partSystems[i]->reSet();
+					partSystems[i]->update();
+				}
+			}
+
+			coin_flags = 0;
+		}
+
+		if (key == GLFW_KEY_UP && action == GLFW_PRESS) {
+			// turn up the volume by 10 %
+			volume = volume + 0.1;
+			if (volume > 1) volume = 1.0;
+
+			SoundEngine->setSoundVolume(volume);
+		}
+		if (key == GLFW_KEY_DOWN && action == GLFW_PRESS) {
+			// turn down the volume by 10 %
+			volume = volume - 0.1;
+			if (volume < 0) volume = 0;
+
+			SoundEngine->setSoundVolume(volume);
+		}
+
+
         if (key == GLFW_KEY_W && action == GLFW_PRESS) {
 			w = true;
 		}
@@ -419,8 +464,6 @@ public:
 		glEnable(GL_BLEND);
 		glBlendFunc(GL_SRC_ALPHA, GL_ONE_MINUS_SRC_ALPHA);
 
-		mat4 projection = ortho(0.0f, 800.0f, 0.0f, 600.0f);
-
 		// create a VBO and VAO for rendering the quads
 		glGenVertexArrays(1, &VAO);
 		glGenBuffers(1, &VBO);
@@ -442,8 +485,14 @@ public:
 	}
 	
 	void renderText(string text, float x, float y, float scale, vec3 color) {
+		int width, height;
+		glfwGetFramebufferSize(windowManager->getHandle(), &width, &height);
+
+		mat4 projection = ortho(0.0f, float(width), 0.0f, float(height));
+
 		textProg->bind();
 		glUniform3f(textProg->getUniform("textColor"), color.x, color.y, color.z);
+		glUniformMatrix4fv(textProg->getUniform("projection"), 1, GL_FALSE, value_ptr(projection));
 		glActiveTexture(GL_TEXTURE0);
 		glBindVertexArray(VAO);
 
@@ -570,11 +619,23 @@ public:
 		}
 	}
 
+	int countSetBits(uint8_t n)
+	{
+		unsigned int count = 0;
+		while (n) {
+			count += n & 1;
+			n >>= 1;
+		}
+		return count;
+	}
+
+
 	void checkCoins() {
 		for (int i = 0; i < coin_loc.size(); i++) {
 			// if you are within 2 units of any coin, collect it
 			if (distance(eye, coin_loc[i]) < 2) {
 				// if we are just now collecting the coin, play the jingle
+				// and print out the number of coins collected
 				if (!(coin_flags & 1 << i)) {
 					SoundEngine->play2D("../audio/coin.wav", false);
 				}
@@ -624,8 +685,30 @@ public:
 				partSystems[i]->update();
 			}
 		}
+		part_texture->unbind();
 
 		partProg->unbind();
+	}
+
+	void colorFade() {
+		if (text_color.r > 0 && text_color.b == 0) {
+			text_color.r = text_color.r - 0.01;
+			if (text_color.r < 0) text_color.r = 0;
+			text_color.g = text_color.g + 0.01;
+			if (text_color.g > 1) text_color.g = 1;
+		}
+		if (text_color.g > 0 && text_color.r == 0) {
+			text_color.g = text_color.g - 0.01;
+			if (text_color.g < 0) text_color.g = 0;
+			text_color.b = text_color.b + 0.01;
+			if (text_color.b > 1) text_color.b = 1;
+		}
+		if (text_color.b > 0 && text_color.g == 0) {
+			text_color.b = text_color.b - 0.01;
+			if (text_color.b < 0) text_color.b = 0;
+			text_color.r = text_color.r + 0.01;
+			if (text_color.r > 1) text_color.r = 1;
+		}
 	}
 
 	void render(GLFWwindow *window) {
@@ -713,7 +796,17 @@ public:
 		Model->popMatrix();
 
 		// draw the text
-		renderText("This is sample text", 100.0f, 100.0f, 1.0f, glm::vec3(0.5, 0.8f, 0.2f));
+		colorFade();
+
+		stringstream onscreen_text;
+		onscreen_text << "Number of coins collected: " << countSetBits(coin_flags) << "/8";
+		renderText(onscreen_text.str(), 20.0f, 20.0f, 1.0f, text_color);
+
+		// and do a congratulations and play a jingle if you've collected all the coins
+		if (coin_flags == 0xFF) {
+			renderText("Congratulations, you found all the coins!", 20.0f, height - 60,
+				1.0f, text_color);
+		}
 
 	}
     
@@ -795,6 +888,7 @@ int main(int argc, char *argv[])
 	ShowCursor(false);
 
 	// start up the music
+	application->SoundEngine->setSoundVolume(application->volume);
 	application->SoundEngine->play2D("../audio/theme.mp3", true);
 
 	// init text to write on screen
