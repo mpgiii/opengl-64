@@ -1,5 +1,4 @@
-Michael Georgariou
-Final Project (Super Mario 64 Coin Collector)
+Super Mario 64 Coin Collector
 
 TO COMPILE:
 - This project depends on the irrKlang and FreeType libraries to compile. I did
