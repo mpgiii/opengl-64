@@ -1,4 +1,4 @@
-cmake_minimum_required(VERSION 3.4)
+cmake_minimum_required(VERSION 3.5)
 include("${CMAKE_SOURCE_DIR}/FindGfxLibs.cmake")
 
 # Name of the project
@@ -18,13 +18,17 @@ file(GLOB_RECURSE GLSL "resources/*.glsl")
 
 include_directories("ext")
 include_directories("ext/glad/include")
+include_directories("ext/freetype")
+include_directories("ext/irrKlang")
 
 # Set the executable.
 add_executable(${CMAKE_PROJECT_NAME} ${SOURCES} ${HEADERS} ${GLSL})
 
-# Helper function included from FindGfxLibs.cmake
+# Helper functions included from FindGfxLibs.cmake
 findGLFW3(${CMAKE_PROJECT_NAME})
 findGLM(${CMAKE_PROJECT_NAME})
+findFreeType(${CMAKE_PROJECT_NAME})
+findSDL2(${CMAKE_PROJECT_NAME})
 
 # OS specific options and libraries
 if(NOT WIN32)
@@ -33,8 +37,8 @@ if(NOT WIN32)
   add_compile_options("-Wall")
   add_compile_options("-pedantic")
   add_compile_options("-Werror=return-type")
- 
-  # TODO: The following links may be uneeded. 
+
+  # TODO: The following links may be uneeded.
   if(APPLE)
     # Add required frameworks for GLFW.
     target_link_libraries(${CMAKE_PROJECT_NAME} "-framework OpenGL -framework Cocoa -framework IOKit -framework CoreVideo")

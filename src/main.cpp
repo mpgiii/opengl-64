@@ -6,9 +6,9 @@
 
 #include <iostream>
 #include <glad/glad.h>
-#include <string>  
-#include <iostream> 
-#include <sstream>   
+#include <string>
+#include <iostream>
+#include <sstream>
 
 
 #include "GLSL.h"
@@ -25,10 +25,11 @@
 
 // stuff for on screen text
 #include "ft2build.h"
-#include "freetype/freetype.h"  
+#include "freetype/freetype.h"
 
 // stuff for audio
-#include <irrklang/irrKlang.h>
+#include <SDL2/SDL.h>
+#include <SDL2/SDL_mixer.h>
 
 // value_ptr for glm
 #include <glm/gtc/type_ptr.hpp>
@@ -36,7 +37,6 @@
 
 using namespace std;
 using namespace glm;
-using namespace irrklang;
 
 #define NUM_TEXTURES 21
 
@@ -97,10 +97,10 @@ public:
 	bool space = false;
 	bool shift = false;
 
-    vector<string> plane_filenames{ "574B138E_c.png", "41A41EE3_c.png", "1FAAE88D_c.png", "359289F2_c.png", 
-		"6E3A21B_c.png", "6B1A233B_c.png", "6B2D96F_c.png", "12436720_c.png", 
-		"1FAAE88D_c.png", "1FAAE88D_c.png", "275F399C_c.png", "4020CDFE_c.png", 
-		"1B46C8C_c.png", "6C631877_c.png", "3D49A9D5_c.png", "C1DF883_c.png", 
+    vector<string> plane_filenames{ "574B138E_c.png", "41A41EE3_c.png", "1FAAE88D_c.png", "359289F2_c.png",
+		"6E3A21B_c.png", "6B1A233B_c.png", "6B2D96F_c.png", "12436720_c.png",
+		"1FAAE88D_c.png", "1FAAE88D_c.png", "275F399C_c.png", "4020CDFE_c.png",
+		"1B46C8C_c.png", "6C631877_c.png", "3D49A9D5_c.png", "C1DF883_c.png",
 		"3F485258_c.png", "10E99677_c.png", "359289F2_c.png", "6B2D96F_c.png", "12436720_c.png" };
 
 	vector<vec3> coin_loc{ vec3(-20, 17, -2), vec3(-3, 5, -11), vec3(23, 6, -27), vec3(14, 10, 28),
@@ -110,8 +110,10 @@ public:
 	vector<particleSys*> partSystems;
 
 	// audio engine
-	ISoundEngine* SoundEngine = createIrrKlangDevice();
-	ik_f32 volume = 0.5;
+	bool audioInitialized = false;
+	Mix_Music* backgroundMusic = nullptr;
+	Mix_Chunk* coinSound = nullptr;
+	float volume = 0.5;
 
 	// text stuff now
 	struct Character {
@@ -164,14 +166,18 @@ public:
 			volume = volume + 0.1;
 			if (volume > 1) volume = 1.0;
 
-			SoundEngine->setSoundVolume(volume);
+			if (audioInitialized) {
+				Mix_VolumeMusic((int)(volume * MIX_MAX_VOLUME));
+			}
 		}
 		if (key == GLFW_KEY_DOWN && action == GLFW_PRESS) {
 			// turn down the volume by 10 %
 			volume = volume - 0.1;
 			if (volume < 0) volume = 0;
 
-			SoundEngine->setSoundVolume(volume);
+			if (audioInitialized) {
+				Mix_VolumeMusic((int)(volume * MIX_MAX_VOLUME));
+			}
 		}
 
 
@@ -216,7 +222,7 @@ public:
 		if (key == GLFW_KEY_LEFT_SHIFT && action == GLFW_RELEASE) {
 			shift = false;
 		}
-        
+
 		if (key == GLFW_KEY_Z && action == GLFW_PRESS) {
 			glPolygonMode( GL_FRONT_AND_BACK, GL_LINE );
 		}
@@ -341,7 +347,7 @@ public:
  		vector<tinyobj::material_t> objMaterials;
  		string errStr;
 		//load in the mesh and make the shape(s)
-        
+
         bool rc = tinyobj::LoadObj(TOshapes, objMaterials, errStr, (resourceDirectory + "/bobomb.obj").c_str());
 		if (!rc) {
 			cerr << errStr << endl;
@@ -370,7 +376,7 @@ public:
 				coin.push_back(mesh);
 			}
 		}
-        
+
         // AND the skybox.
         rc = tinyobj::LoadObj(TOshapes, objMaterials, errStr, (resourceDirectory + "/cube.obj").c_str());
 		if (!rc) {
@@ -384,9 +390,9 @@ public:
 
 				skybox.push_back(mesh);
 			}
-		}   
+		}
 	}
-    
+
     void initTex(const std::string& resourceDirectory) {
 		// for particles
 		part_texture = make_shared<Texture>();
@@ -424,7 +430,7 @@ public:
 		glPixelStorei(GL_UNPACK_ALIGNMENT, 1); // disable byte-alignment restriction
 
 		for (unsigned char c = 0; c < 128; c++) {
-			// load character glyph 
+			// load character glyph
 			if (FT_Load_Char(face, c, FT_LOAD_RENDER))
 			{
 				std::cout << "ERROR::FREETYTPE: Failed to load Glyph" << std::endl;
@@ -455,7 +461,7 @@ public:
 				texture,
 				glm::ivec2(face->glyph->bitmap.width, face->glyph->bitmap.rows),
 				glm::ivec2(face->glyph->bitmap_left, face->glyph->bitmap_top),
-				face->glyph->advance.x
+				static_cast<unsigned int>(face->glyph->advance.x)
 			};
 			Characters.insert(std::pair<char, Character>(c, character));
 		}
@@ -483,7 +489,63 @@ public:
 
 		return 0;
 	}
-	
+
+	int initAudio() {
+		// Initialize SDL audio subsystem
+		if (SDL_Init(SDL_INIT_AUDIO) < 0) {
+			std::cout << "SDL could not initialize! SDL Error: " << SDL_GetError() << std::endl;
+			return -1;
+		}
+
+		// Initialize SDL_mixer
+		if (Mix_OpenAudio(44100, MIX_DEFAULT_FORMAT, 2, 2048) < 0) {
+			std::cout << "SDL_mixer could not initialize! SDL_mixer Error: " << Mix_GetError() << std::endl;
+			SDL_Quit();
+			return -1;
+		}
+
+		audioInitialized = true;
+
+		// Load background music
+		backgroundMusic = Mix_LoadMUS("../audio/theme.mp3");
+		if (backgroundMusic == nullptr) {
+			std::cout << "Failed to load background music! SDL_mixer Error: " << Mix_GetError() << std::endl;
+		}
+
+		// Load coin sound effect
+		coinSound = Mix_LoadWAV("../audio/coin.wav");
+		if (coinSound == nullptr) {
+			std::cout << "Failed to load coin sound! SDL_mixer Error: " << Mix_GetError() << std::endl;
+		}
+
+		// Set initial volume
+		Mix_VolumeMusic((int)(volume * MIX_MAX_VOLUME));
+
+		return 0;
+	}
+
+	void cleanupAudio() {
+		if (audioInitialized) {
+			// Stop and free music
+			Mix_HaltMusic();
+			if (backgroundMusic) {
+				Mix_FreeMusic(backgroundMusic);
+				backgroundMusic = nullptr;
+			}
+
+			// Free sound effects
+			if (coinSound) {
+				Mix_FreeChunk(coinSound);
+				coinSound = nullptr;
+			}
+
+			// Close SDL_mixer and SDL
+			Mix_CloseAudio();
+			SDL_Quit();
+			audioInitialized = false;
+		}
+	}
+
 	void renderText(string text, float x, float y, float scale, vec3 color) {
 		int width, height;
 		glfwGetFramebufferSize(windowManager->getHandle(), &width, &height);
@@ -532,12 +594,12 @@ public:
 		glBindTexture(GL_TEXTURE_2D, 0);
 		textProg->unbind();
 	}
-    
+
     unsigned int createSky(string dir, vector<string> faces) {
         unsigned int textureID;
         glGenTextures(1, &textureID);
         glBindTexture(GL_TEXTURE_CUBE_MAP, textureID);
-        
+
         int width, height, nrChannels;
         stbi_set_flip_vertically_on_load(false);
         for(GLuint i = 0; i < faces.size(); i++) {
@@ -548,7 +610,7 @@ public:
                 0, GL_RGB, width, height, 0, GL_RGB, GL_UNSIGNED_BYTE, data);
             } else {
                 cout << "failed to load: " << (dir+faces[i]).c_str() << endl;
-            }   
+            }
         }
         glTexParameteri(GL_TEXTURE_CUBE_MAP, GL_TEXTURE_MAG_FILTER, GL_LINEAR);
         glTexParameteri(GL_TEXTURE_CUBE_MAP, GL_TEXTURE_MIN_FILTER, GL_LINEAR);
@@ -637,7 +699,9 @@ public:
 				// if we are just now collecting the coin, play the jingle
 				// and print out the number of coins collected
 				if (!(coin_flags & 1 << i)) {
-					SoundEngine->play2D("../audio/coin.wav", false);
+					if (audioInitialized && coinSound) {
+						Mix_PlayChannel(-1, coinSound, 0);
+					}
 				}
 				coin_flags |= 1 << i;
 			}
@@ -759,8 +823,8 @@ public:
 		drawCoins(Model);
 
 		prog->unbind();
-        
-        
+
+
         // Now draw all the textured stuff
 		texProg->bind();
 		glUniformMatrix4fv(texProg->getUniform("P"), 1, GL_FALSE, value_ptr(Projection->topMatrix()));
@@ -780,11 +844,11 @@ public:
 				plane_texture[i]->unbind();
 			}
 		Model->popMatrix();
-       
+
 		texProg->unbind();
 
 		setSkybox(Projection, View, Model);
-        
+
         sAnimation = sin(glfwGetTime());
 
 		// now do the particle stuff
@@ -809,7 +873,7 @@ public:
 		}
 
 	}
-    
+
     void SetMaterial(int i) {
         switch(i) {
             case 0: // shiny blue plastic
@@ -885,11 +949,12 @@ int main(int argc, char *argv[])
     application->initTex(resourceDir);
 	application->initPart();
     res = application->createSky(resourceDir, faces);
-	ShowCursor(false);
+	// ShowCursor(false); // Windows-specific function, commented out for cross-platform compatibility
 
 	// start up the music
-	application->SoundEngine->setSoundVolume(application->volume);
-	application->SoundEngine->play2D("../audio/theme.mp3", true);
+	if (application->initAudio() == 0 && application->backgroundMusic) {
+		Mix_PlayMusic(application->backgroundMusic, -1); // -1 means loop indefinitely
+	}
 
 	// init text to write on screen
 	if (application->initText() == -1) {
@@ -908,7 +973,8 @@ int main(int argc, char *argv[])
 		glfwPollEvents();
 	}
 
-	// Quit program.
+	// Cleanup audio and quit program.
+	application->cleanupAudio();
 	windowManager->shutdown();
 	return 0;
 }
