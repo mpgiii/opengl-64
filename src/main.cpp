@@ -507,6 +507,8 @@ public:
 		audioInitialized = true;
 
 		// Load background music
+		// note: this file is not included in the repo because
+		// I don't wanna host copyrighted stuff lol
 		backgroundMusic = Mix_LoadMUS("../audio/theme.mp3");
 		if (backgroundMusic == nullptr) {
 			std::cout << "Failed to load background music! SDL_mixer Error: " << Mix_GetError() << std::endl;
